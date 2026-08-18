@@ -1,6 +1,8 @@
 import numpy as np
-from .constants import kb, hbar
+from scipy.interpolate import CubicSpline
+from .constants import kb, hbar, ref_mass
 from .task_driver import TaskDriver
+from .bead import Bead
 
 class RingPolymer():
     def __init__(self, T, beads, task_driver:TaskDriver):
@@ -9,67 +11,183 @@ class RingPolymer():
         self.T = T
         self.beta = (kb*self.T)**-1
         self.betaN = self.beta / self.N
-        self.exact_hessian = False
+        #self.exact_hessian = False
         self.task_driver = task_driver
+
+    def M(self):
+        return np.diag(np.concatenate([np.diag(bead.M) for bead in self.beads]))
+            
+    def Minv(self):
+        return np.diag(np.concatenate([np.diag(bead.Minv) for bead in self.beads]))
 
     def U(self):
         out = 0.0
         for b, bead in enumerate(self.beads): # Sum from 1 to N
-            if b == 0:
+            Vx = bead.energy
+            out += Vx
+            if b == 0: # Only count each "spring energy" once between each bead
                 continue
-            Vx = bead.V
-            d = bead.dist(self.beads[b-1]) # f x 3 matrix
-            d *= d
-            Vharm = np.sum(d * bead.mol.masses[:,None])
+            print(f"{b}")
+            Vharm = np.sum(bead.masses * (bead.x - self.beads[b-1].x)**2)
             Vharm /= 2*(self.betaN**2)*(hbar**2)
-            out += Vx + Vharm
+            out += Vharm
         return out
 
     def gradient(self):
         # Gradient of R.P.
-        prefactor = np.repeat(self.beads[0].mol.masses, 3) / (self.betaN**2 * hbar**2)
-        big_grad = np.array([])
-        for n in range(len(self.beads)):
-            # n idxs each bead of N/2 polymer
-            lil_grad = np.copy(self.beads[n].gradient).flatten()
-            if n == 1:
-                lil_grad += prefactor * (self.beads[0].mol.geometry - self.beads[1].mol.geometry).flatten()
-            elif n == len(self.beads) - 1:
-                lil_grad += prefactor * (self.beads[n].mol.geometry - self.beads[n-1].mol.geometry).flatten()
+        prefactor = 1.0 / (self.betaN**2 * hbar**2)
+        lmol = len(self.beads[0])
+        big_grad = np.zeros(len(self.beads)*lmol)
+        for bi, bead in enumerate(self.beads):
+            bead_grad = np.copy(bead.gradient).flatten()
+            lil_grad = np.zeros_like(bead_grad)
+            if bi == 0:
+                lil_grad += prefactor * (bead.x - self.beads[1].x)
+            elif bi == len(self.beads) - 1:
+                lil_grad += prefactor * (bead.x - self.beads[bi-1].x)
             else:
-                lil_grad += prefactor * 2.0*self.beads[n].mol.geometry.flatten() 
-                lil_grad -= prefactor * self.beads[n-1].mol.geometry.flatten() 
-                lil_grad -= prefactor * self.beads[n+1].mol.geometry.flatten()
-            big_grad = np.concatenate((big_grad, lil_grad))
+                lil_grad += prefactor * 2.0*bead.x
+                lil_grad -= prefactor * self.beads[bi-1].x
+                lil_grad -= prefactor * self.beads[bi+1].x
+            big_grad[bi*lmol:(bi+1)*lmol] = (bead.masses * lil_grad) + bead_grad
         return big_grad
     
-    def hessian(self):
-        # Hessian of R.P.
-        pass
-    
-    def evaluate_all_beads(self, do_hess=False):
-        for bi, b in enumerate(self.beads):
-            b.energy = self.task_driver.energy
-            b.gradient = self.task_driver.gradient
-            print(f"Bead {bi} energy and gradient computed.")
-            if do_hess:
-                b.hessian = self.task_driver.hessian
-                print(f"Bead {bi} energy and gradient computed.")
-                self.exact_hessian = True
-            else:
-                self.hessian_update()
-                self.exact_hessian = False
+    def spring_subhess(self):
+        A = np.eye(len(self.beads[0]))
+        A *= self.beads[0].masses / (self.betaN**2 * hbar**2)
+        return A
 
-    def hessian_update(self):
-        pass
+    def hessian(self):
+        # Hessian of half R.P.
+        lmol = len(self.beads[0])
+        #A = np.eye(len(self.beads[0]))
+        #A *= self.beads[0].masses / (self.betaN**2 * hbar**2)
+        A = self.spring_subhess()
+        hN = lmol * len(self.beads)
+        bigHess = np.zeros((hN, hN))
+        for bi, bead in enumerate(self.beads):
+            pre_dstart = lmol * (bi-1)
+            dstart = lmol * bi
+            dend = lmol * (bi+1)
+            post_dend = lmol * (bi+2)
+            bigHess[dstart:dend, dstart:dend] += bead.hessian
+            if bi == 0:
+                bigHess[dstart:dend, dstart:dend] += A
+                bigHess[dend:post_dend, dstart:dend] -= A
+            elif bi == len(self.beads) - 1:
+                bigHess[dstart:dend, dstart:dend] += A
+                bigHess[pre_dstart:dstart, dstart:dend] -= A
+            else:
+                bigHess[dstart:dend, dstart:dend] += 2*A
+                bigHess[pre_dstart:dstart, dstart:dend] -= A
+                bigHess[dend:post_dend, dstart:dend] -= A
+        return bigHess
+
+    def full_U(self):
+        return 2.0 * self.U()
+    
+    def full_gradient(self):
+        # Gradient of full R.P.
+        # Structured as Bead_0, Bead_1, ..., Bead_N/2-1, Bead_0, Bead_1, ..., Bead_N/2-1
+        half_grad = self.gradient()
+        #return np.hstack((half_grad, np.flip(half_grad)))
+        return np.hstack((half_grad, half_grad))
+
+    def full_hessian(self):
+        # Hessian of R.P.
+        # Structured as Bead_0, Bead_1, ..., Bead_N/2-1, Bead_0, Bead_1, ..., Bead_N/2-1
+        lmol = len(self.beads[0])
+        #A = np.eye(lmol)
+        #A *= 1.0 / (self.betaN**2 * hbar**2)
+        A = self.spring_subhess()
+        half_Hess = self.hessian()
+        # Diagonal is just the half Hessians with corrections for N_0 and N_N/2-1
+        half_Hess[:lmol,:lmol] += A
+        half_Hess[-lmol:,-lmol:] += A
+        # There are some couplings from the spring forces between the copies of N_0 and N_N/2-1 with their originals
+        off_diag = np.zeros_like(half_Hess)
+        off_diag[:lmol,:lmol] -= A
+        off_diag[-lmol:,-lmol:] -= A
+        return np.block([[half_Hess, off_diag],[off_diag, half_Hess]])
+
+    def mw_full_hess(self):
+        fh = self.full_hessian()
+        Mweight = np.diag(np.tile(np.diag(self.Minv()), 2))
+        return Mweight @ fh @ Mweight
+
+    def evaluate_all_beads(self, der_lvl=1, update_hess=False):
+        assert type(der_lvl) == int
+        if der_lvl < 0 or der_lvl > 2:
+            raise ValueError("Derivative level (der_lvl) needs to be 0, 1, or 2!")
+        loading_bar_length = len(self.beads)
+        print("="*loading_bar_length)
+        for bi, bead in enumerate(self.beads):
+            if not bead.has_V:
+                bead.energy = self.task_driver.energy
+            if der_lvl >= 1 and not bead.has_grad:
+                bead.gradient = self.task_driver.gradient
+            # Check for der_lvl and whether an exact Hess is known
+            if der_lvl == 2:
+                if not (bead.has_hess and bead.exact_hessian):
+                    bead.hessian = self.task_driver.hessian
+                    bead.exact_hessian = True
+            elif update_hess:
+                bead.hessian = lambda mol: bead.update_hessian(mol)
+                bead.exact_hessian = False
+            else:
+                bead.exact_hessian = False
+            print("*", end="", flush=True)
+        print("")
 
     def double_beads(self):
-        pass
+        n = np.arange(len(self.beads))
+        ref_mol = self.beads[0].mol
+        natoms = self.beads[0].natoms
+        geoms    = np.vstack([bead.mol.geometry.flatten() for bead in self.beads])
+        hessians = np.vstack([bead.hessian.flatten() for bead in self.beads])
+        geom_spline = CubicSpline(n, geoms)
+        hess_spline = CubicSpline(n, hessians)
+        new_beads = [self.beads[0]]
+        for bidx in range(1,len(self.beads)):
+            new_geom = geom_spline(bidx - 0.5)
+            new_hess = hess_spline(bidx - 0.5)
+            newBead = Bead(ref_mol.copy(update={"geometry": new_geom.reshape((natoms,3))}))
+            newBead._hess = new_hess.reshape((3*natoms,3*natoms))
+            newBead.has_hess = True
+            newBead.exact_hessian = False
+            new_beads.append(newBead)
+            new_beads.append(self.beads[bidx])
+        self.beads = new_beads # Bead 1 to N/2, indexed minus 1 bc Python
+        self.N = len(self.beads) * 2
+        self.betaN = self.beta / self.N
 
     def align_beads(self):
         for b in range(1,len(self.beads)):
             if self.beads[b].has_data:
                 print(Warning("Aligning beads with computed data will overwrite the computed data."))
-            self.beads[b].mol = self.beads.mol[b].align(
-                self.beads.mol[b-1], atoms_map=True)
+            self.beads[b].mol = self.beads[b].mol.align(
+                self.beads[b-1].mol, atoms_map=True)[0].geometry
+            
+    def com(self):
+        out = np.zeros(3)
+        for bead in self.beads:
+            out += np.sum(np.diag(bead.mol.masses) @ bead.mol.geometry, axis=0)
+        return out / (self.N * np.sum(self.beads[0].mol.masses))
+
+    def moit(self):
+        c = self.com()
+        I = np.zeros((3,3))
+        for bead in self.beads:
+            for i in range(3):
+                # i + 1 mod 3 and i + 2 mod 3 essentially give not i
+                I[i,i] += np.sum(bead.mol.masses * 
+                                 ( (bead.mol.geometry[:,(i+1)%3] - c[(i+1)%3])**2 
+                                 + (bead.mol.geometry[:,(i+2)%3] - c[(i+1)%3])**2))
+                for j in range(i+1,3):
+                    I[i,j] += -1.0 * np.sum(bead.mol.masses
+                        * (bead.mol.geometry[:,i] - c[i])
+                        * (bead.mol.geometry[:,j] - c[j]))
+                    I[j,i] = I[i,j]
+        return I
+
 
