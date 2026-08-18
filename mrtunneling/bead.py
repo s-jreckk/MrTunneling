@@ -4,6 +4,20 @@ from .constants import au_to_amu, ref_mass
 
 class Bead():
     def __init__(self, mol):
+        """
+            mol: QCElemental molecule, structures are currently always assuming
+                Cartesian coordinates
+            _V: Energy of mol
+            _grad: Gradient of mol in Cartesian coords (3N,) np.array
+            _hess: Hessian of mol in Cartesian coords (3N,3N) np.array
+            _old...: Storing old values for Hessian updates
+            has_...: Used to check if values are already known
+            exact_hessian: Did we compute a Hessian or use an approximate one?
+            masses: Nuclear masses in m_e (3N,) np.array
+            natoms: Number of atoms
+            M: Mass-weighting matrix (3N,3N) np.array
+            Minv: Inverse mass-weighting matrix (3N,3N) np.array
+        """
         self._mol = mol
         self._V = None
         self._grad = None
@@ -44,6 +58,9 @@ class Bead():
         return self._mol
 
     def update(self, newmol_geom):
+        # Modify the coordiantes of the bead molecule, clear all known values
+        #   and set to the new "old" values
+        # Probably shouldn't update beads if nothing has been done
         if not self.has_V or not self.has_grad or not self.has_hess:
             raise AttributeError("Energy, gradient, and/or Hessian has not been evaluated prior to bead update.")
         self._oldmol = self._mol.copy()
@@ -87,6 +104,8 @@ class Bead():
         g = grad_fxn(self.mol)
         if len(g.flatten()) != len(self):
             raise ValueError("Computed gradient length does not match Bead molecule.")
+        # Electronic structure programs typically keep the gradient as an (N,3) array.
+        #   We want it flat.
         self._grad = g.flatten()
         self.has_grad = True
 
@@ -121,9 +140,13 @@ class Bead():
     
     # Bofill as used in Optking
     def update_hessian(self, mol):
+        """
+            Hessian update scheme, using previous Hessian, old gradient, 
+                and new gradient.
+            Bofill_Hess = (1-phi) * MS_Hess + phi * Powell_Hess
+        """
         if self._oldhess is None: # Consider using empirical Hess guess
             raise AttributeError("No Hessian has been previosly computed!")
-        # Bofill = (1-phi) * MS + phi * Powell
         dq = (self.mol.geometry - self._oldmol.geometry).flatten()
         dg = self.gradient - self._oldgrad
         dqdq = dq @ dq
@@ -146,6 +169,7 @@ class Bead():
         return H_new
 
     def write(self, dir, idx):
+        # Save bead and relevant attributes to files in dir
         root = f"bead_{idx}"
         with open(dir / f"{root}.mol", "w") as f:
             f.write(self.__str__())

@@ -2,6 +2,8 @@ import numpy as np
 
 from .constants import hbar
 
+# I have no clue if any of these work...
+
 def trans_pfxn(ring_polymer):
     M = np.sum(ring_polymer.beads[0].mol.masses)
     out = ((ring_polymer.N*M) / (2*np.pi*ring_polymer.betaN*hbar**2))**(3.0/2.0)
@@ -51,8 +53,13 @@ def rate(inst_rp, r_rp):
     Q_t = trans_pfxn(inst_rp)
     Q_r = rot_pfxn(inst_rp)
     Q_v = vib_pfxn_inst(inst_rp)
-
-def kappa(self):
-    Q_r_inst = rot_pfxn(self)
-    Q_v_inst = vib_pfxn_inst(self)
-    Q_r_ts = rot_pfxn()
+    
+def kappa(inst_rp, r_rp):
+    Q_r_inst = rot_pfxn(inst_rp)
+    Q_v_inst = vib_pfxn_inst(inst_rp)
+    Q_r_ts = rot_pfxn(r_rp)
+    Q_v_ts = rot_pfxn(r_rp)
+    S = 0
+    V = 0
+    kappa = np.exp((-S/hbar) + (r_rp.beta*V))
+    kappa *= (Q_r_inst * Q_v_inst)/(Q_r_ts * Q_v_ts)

@@ -39,10 +39,12 @@ class Instanton(RingPolymer):
             self.align_beads()
 
     def crossover_T(self):
+        # Crossover temperature, don't run instantons above this temperature
         return hbar * np.abs(self.wb) / (2*np.pi*kb)
 
     def optimize(self, opt_plan):
         self.read_opt_plan(opt_plan)
+        # Compute exact Hessian for first step
         self.evaluate_all_beads(der_lvl=2)
         self.save_state(f"step_{self.restart_at}")
         for iter in range(1,self.max_iter):
@@ -87,6 +89,7 @@ class Instanton(RingPolymer):
         raise Exception("Max number of iterations reached without convergence!")
 
     def read_opt_plan(self, opt_plan):
+        # Get relevant optimization settings
         new_opt_plan = self._default_opt_plan.copy()
         invalid = set(opt_plan.keys()) - set(self._default_opt_plan.keys())
         if invalid:
@@ -155,6 +158,15 @@ class Instanton(RingPolymer):
 
     @classmethod
     def initiate_from_TS(cls, T, TSmol, TShess, Nbeads, task_driver, delta=0.1):
+        """
+            Initiate ring polymer from a transition state structure and Hessian
+            T: Temperature
+            TSmol: QCElemental molecule for transition state
+            TShess: Hessian at transition state (3N,3N) np.array
+            Nbeads: Initial number of beads
+            task_driver: Functions for getting energies, gradients, and Hessians
+            delta: Step scale from transition state coordinates for new beads
+        """
         # Do Hessian analysis on TShess
         freqs, nmodes = proc_Hess(TSmol, TShess)
         if freqs[0] > 0.0:
@@ -173,6 +185,7 @@ class Instanton(RingPolymer):
         return cls(freqs[0], T, beads, task_driver, align=True)
 
     def save_state(self, dirname):
+        # Save data to directory: dirname
         d = pathlib.Path(dirname)
         d.mkdir(parents=True, exist_ok=True)
         self.write_to_mXYZ(d / "all_structs.xyz")
@@ -183,11 +196,13 @@ class Instanton(RingPolymer):
             f.write(f"T:{self.T}")
 
     def write_to_mXYZ(self, fn):
+        # Write an XYZ file with all of the beads
         with open(f"{fn}", "w") as f:
             f.write("\n>\n".join([str(i) for i in self.beads]))
     
     @classmethod
     def read_state(cls, restart_dir):
+        # Load previous instanton data for restarting
         p = pathlib.Path(restart_dir)
         # Read instanton conditions
         with open(p / "other_data.dat", "r") as f:
@@ -220,6 +235,7 @@ class Instanton(RingPolymer):
 
     @classmethod
     def restart(cls, restart_dir, task_driver, temp=None):
+        # Set up instanton for restarting
         ra = int(restart_dir.strip("step_")) + 1
         # NEW
         c = cls.read_state()
@@ -262,8 +278,4 @@ class Instanton(RingPolymer):
         #    beads.append(b)
         #return cls(wb, T, beads, task_driver, restart_at=ra)
 
-    def rate(self):
-        Q_t = trans_pfxn(self)
-        Q_r = rot_pfxn(self)
-        Q_v = vib_pfxn_inst(self)
-        pass
+ 
