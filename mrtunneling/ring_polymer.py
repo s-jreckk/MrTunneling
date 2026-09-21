@@ -35,12 +35,12 @@ class RingPolymer():
         # Inverse mass-weighting matrix
         return np.diag(np.concatenate([np.diag(bead.Minv) for bead in self.beads]))
 
-    def U(self):
+    def U(self, ref_E=0.0):
         # Half ring polymer potential
         out = 0.0
         for b, bead in enumerate(self.beads): # Sum from 1 to N
             # Bead energy from task driver
-            Vx = bead.energy
+            Vx = bead.energy - ref_E
             out += Vx
             if b == 0: # Only count each "spring energy" once between each bead
                 continue
@@ -106,9 +106,9 @@ class RingPolymer():
                 bigHess[dend:post_dend, dstart:dend] -= A
         return bigHess
 
-    def full_U(self):
+    def full_U(self, ref_E=0.0):
         # Full ring polymer potential
-        return 2.0 * self.U()
+        return 2.0 * self.U(ref_E=ref_E)
     
     def full_gradient(self):
         # Gradient of full ring polymer

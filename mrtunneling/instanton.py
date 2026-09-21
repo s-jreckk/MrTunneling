@@ -8,7 +8,7 @@ from .constants import hbar, h2cm, kb, au_to_amu, ref_mass
 from .utils import proc_Hess
 from .ring_polymer import RingPolymer
 from .bead import Bead
-from .partition_functions import trans_pfxn, rot_pfxn, vib_pfxn_R, vib_pfxn_inst
+#from .partition_functions import trans_pfxn, rot_pfxn, vib_pfxn_R, vib_pfxn_inst
 
 class Instanton(RingPolymer):
 
@@ -238,7 +238,7 @@ class Instanton(RingPolymer):
         # Set up instanton for restarting
         ra = int(restart_dir.strip("step_")) + 1
         # NEW
-        c = cls.read_state()
+        c = cls.read_state(restart_dir)
         if temp is not None:
             c.T = temp
         c.task_driver = task_driver
