@@ -25,5 +25,6 @@ class TaskDriver(ABC):
     def hessian(self, mol:Molecule) -> np.ndarray:
         pass
     
-
+    def energy_and_gradient(self, mol:Molecule):
+        pass
 

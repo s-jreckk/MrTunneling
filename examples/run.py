@@ -1,5 +1,8 @@
+import psi4
 import qcelemental as qcel
 import numpy as np
+
+from examples.mueller_brown_driver import MuellerBrownRunner
 from pfxns import PsiRunner
 import mrtunneling
 
@@ -14,6 +17,7 @@ import mrtunneling
 
 # Define task driver
 pRun = PsiRunner()
+#pRun = MuellerBrownRunner()
 
 # Reactant optimized geometry, get energy, gradient, and Hessian for rate computation
 # CH4 + H Reactant HF/STO-3G
@@ -52,6 +56,11 @@ molstr = """
   H           -0.453362774775     0.045146679726    -1.041040456325 
   H           -1.385776755607     0.120943170367     1.524932008844 
 """
+
+x = -0.822
+y =  0.624
+z =  0
+mbstring = "O " + str(x*psi4.constants.bohr2angstroms) + " " + str(y*psi4.constants.bohr2angstroms) + " " + str(z*psi4.constants.bohr2angstroms)
 
 qcmol = qcel.models.Molecule.from_data(molstr)
 E = pRun.energy(qcmol)

@@ -20,9 +20,12 @@ class PsiRunner(TaskDriver):
         G, wfn = psi4.gradient(self.method, return_wfn=True)
         return G.np
 
+    def energy_and_gradient(self, mol):
+        psi4.geometry(mol.to_string(dtype="psi4"))
+        gradient, wavefunction = psi4.gradient(self.method, return_wfn=True)
+        return wavefunction.variable("CURRENT ENERGY"), gradient.np
+
     def hessian(self, mol):
         psi4.geometry(mol.to_string(dtype="psi4"))
         H, wfn = psi4.hessian(self.method, return_wfn=True)
         return H.np
-
-

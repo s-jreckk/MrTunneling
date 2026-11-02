@@ -5,7 +5,7 @@ from copy import deepcopy
 import re
 import scipy
 import qcelemental as qcel
-from qcelemental.models.molecule import Molecule
+from qcelemental.models.v2.molecule import Molecule
 from .constants import hbar, h2cm, kb, au_to_amu, ref_mass
 from .utils import proc_Hess
 from .task_driver import TaskDriver
